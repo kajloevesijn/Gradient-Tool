@@ -29,15 +29,17 @@ const uniforms = {
   uSpeedY: { value: 1 },
   uSpeedZ: { value: 1 },
   uColorResolution: { value: 20},
+  uNoiseType: {value: '0' },
 };
 
 const noiseTypes = {
-  cellNoise: '',
-  absCellNoise: '(abs(cellNoise(interpolatedPosition, scale)))*3.0;',
-  gradientNoise: '',
+  cellNoise: '0',
+  absCellNoise: '1',
+  heightNoise: '2',
+  heightCellMult: '3',
 }
 
-const currentNoiseType = noiseTypes.absCellNoise;
+let currentNoiseType = noiseTypes.absCellNoise;
 
 const vertexShader = `
 precision mediump float;
@@ -45,7 +47,6 @@ uniform float uTime;
 uniform float uSeed;
 uniform float uScaleX;
 uniform float uScaleY;
-uniform float uScaleZ;
 uniform float uSpeedX;
 uniform float uSpeedY;
 uniform float uSpeedZ;
@@ -161,9 +162,9 @@ void main() {
 
   vec3 pos = position;
 
-  vec3 noisePos = vec3((pos.x * uScaleX) + uTime * uSpeedX, (pos.y * uScaleY) + uTime * uSpeedY, (pos.z * uScaleZ) + uTime * uSpeedZ);
+  vec3 noisePos = vec3((pos.x * uScaleX) + uTime * uSpeedX, (pos.y * uScaleY) + uTime * uSpeedY, (pos.z) + uTime * uSpeedZ);
   
-  noiseMap = cnoise(noisePos);
+  noiseMap = abs(cnoise(noisePos));
   interpolatedPosition = noisePos * 3.0;
   pos.z += noiseMap * uAmplitude;
 
@@ -179,32 +180,10 @@ const fragmentShader = `
   uniform vec3 uColor4;
   uniform float uTime;
   uniform float uColorResolution;
+  uniform int uNoiseType;
 
   varying vec2 vUv;
   varying float noiseMap;
-
-  vec3 blend4Colors(float t, vec3 color1, vec3 color2, vec3 color3, vec3 color4, vec3 thresholds) {
-    // Ensure t is within the bounds [0, 1]
-    t = clamp(t, 0.0, 1.0);
-
-    // Determine the color intervals based on t
-    if (t < thresholds.x) {
-        // Blend between color1 and color2
-        float adjustedT = t / thresholds.x;
-        adjustedT = smoothstep(0.0, 1.0, adjustedT);
-        return mix(color1, color2, adjustedT);
-    } else if (t < thresholds.y) {
-        // Blend between color2 and color3
-        float adjustedT = (t - thresholds.x) / (thresholds.y - thresholds.x);
-        adjustedT = smoothstep(0.0, 1.0, adjustedT);
-        return mix(color2, color3, adjustedT);
-    } else {
-        // Blend between color3 and color4
-        float adjustedT = (t - thresholds.y) / (1.0 - thresholds.y);
-        adjustedT = smoothstep(0.0, 1.0, adjustedT);
-        return mix(color3, color4, adjustedT);
-    }
-  }
 
   vec3 gradientMap(vec3 color1, vec3 color2, vec3 color3, vec3 color4, float t) {
     vec3 finalColor = mix(mix(color1, color2, t), mix(mix(color2, color3, t), color4, t), t);
@@ -268,7 +247,17 @@ float cellNoise(vec3 position, float scale) {
 void main() {
     float scale = uColorResolution; // Adjust the scale value as desired
     
-    float noise = ${currentNoiseType}
+    float noise = 0.0;
+
+    if (uNoiseType == 0) {
+      noise = (cellNoise(interpolatedPosition, scale) + 0.3) * 1.5;
+    }else if (uNoiseType == 1){
+      noise = (abs(cellNoise(interpolatedPosition, scale)))*3.0;
+    } else if (uNoiseType == 2) {
+      noise = noiseMap;
+    } else if (uNoiseType == 3){
+      noise = ((abs(cellNoise(interpolatedPosition, scale)))*3.0) * noiseMap;
+    }
 
     gl_FragColor = vec4(gradientMap(uColor1,uColor2,uColor3,uColor4,noise), 1.0);
 }
@@ -277,8 +266,6 @@ void main() {
 const Wave = (props) => {
 
   const ref = useRef();
-
-  
 
   useFrame(({ clock }) => {
     ref.current.uniforms.uTime.value = clock.getElapsedTime();
@@ -297,7 +284,7 @@ const Wave = (props) => {
 
   return (
     <mesh>
-      <planeBufferGeometry args={[16, 6, 100, 100]} />
+      <planeBufferGeometry args={[16, 6, 400, 400]} />
       <shaderMaterial ref={ref}
         uniforms={uniforms}
         vertexShader={vertexShader}
@@ -316,11 +303,11 @@ const Scene = () => {
   const [scaleZ, setScaleZ] = useState(11.0);
   const [amplitude, setAmplitude] = useState(100.0);
 
-  const [speedX, setSpeedX] = useState(21.0);
-  const [speedY, setSpeedY] = useState(11.0);
-  const [speedZ, setSpeedZ] = useState(21.0);
+  const [speedX, setSpeedX] = useState(20.0);
+  const [speedY, setSpeedY] = useState(10.0);
+  const [speedZ, setSpeedZ] = useState(20.0);
 
-  const [colorResolution, setcolorResolution] = useState(13.0);
+  const [colorResolution, setcolorResolution] = useState(10.0);
 
   const [colorIndex, setColorIndex] = useState(0);
 
@@ -329,6 +316,8 @@ const Scene = () => {
   const [showPicker, setShowPicker] = useState(false);
 
   const [pickerPos, setPickerPos] = useState([220, 250]);
+
+  const [noiseType, setNoiseType] = useState(noiseTypes.absCellNoise);
 
   const refs = useRef(null);
 
@@ -346,10 +335,7 @@ const Scene = () => {
 
     if (pickerIndex === colorIndex) {
       setShowPicker(!showPicker);
-    } else {
-
     }
-
 
     setColorIndex(pickerIndex);
   }
@@ -377,7 +363,7 @@ const Scene = () => {
   }
 
   useEffect(()=>{
-    uniforms.uColorResolution.value = colorResolution;
+    uniforms.uColorResolution.value = 100 / colorResolution;
   },[colorResolution])
 
   useEffect(() => {
@@ -395,6 +381,10 @@ const Scene = () => {
     setShowPicker(false);
   }, [])
 
+  useEffect(()=>{
+    uniforms.uNoiseType.value = noiseType;
+  },[noiseType])
+
   return (
 
     <div className='overflow-clip'>
@@ -402,7 +392,7 @@ const Scene = () => {
         <div className='h-[50rem] w-[250rem] -rotate-12 -translate-x-[10rem] -translate-y-[30rem]'>
           <Canvas className='' camera={{ fov: 40, rotation: [0.25, 0, 0], position: [3, -2, 5] }}>
             <Suspense fallback={null}>
-              <Wave scaleX={scaleX / 100} scaleY={scaleY / 100} scaleZ={scaleZ / 100} amplitude={amplitude / 100} speedX={speedX / 100} speedY={speedY / 100} speedZ={speedZ / 100} colorResolution ={colorResolution}/>
+              <Wave scaleX={scaleX / 100} scaleY={scaleY / 100} scaleZ={scaleZ / 100} amplitude={amplitude / 100} speedX={speedX / 100} speedY={speedY / 100} speedZ={speedZ / 100}/>
             </Suspense>
           </Canvas>
         </div>
@@ -500,19 +490,19 @@ const Scene = () => {
                 <div className=''>
                   <p className='py-1'>X:</p>
                   <div >
-                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={speedX - 1} onChange={(e) => { setSpeedX(Number(e.target.value) + 1) }} />
+                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={speedX} onChange={(e) => { setSpeedX(Number(e.target.value)) }} />
                   </div>
                 </div>
                 <div className=''>
                   <p className='py-1'>Y:</p>
                   <div >
-                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={speedY - 1} onChange={(e) => { setSpeedY(Number(e.target.value) + 1) }} />
+                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={speedY} onChange={(e) => { setSpeedY(Number(e.target.value)) }} />
                   </div>
                 </div>
                 <div className=''>
                   <p className='py-1'>Z:</p>
                   <div >
-                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={speedZ - 1} onChange={(e) => { setSpeedZ(Number(e.target.value) + 1) }} />
+                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={speedZ} onChange={(e) => { setSpeedZ(Number(e.target.value)) }} />
                   </div>
                 </div>
               </div>
@@ -525,9 +515,25 @@ const Scene = () => {
                 <div className=''>
                   <p className='py-1'>Resolution:</p>
                   <div >
-                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={colorResolution - 1} onChange={(e) => { setcolorResolution(Number(e.target.value) + 1) }} />
+                    <input className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' type="text" name="" id="" value={colorResolution} onChange={(e) => { setcolorResolution(Number(e.target.value)) }} />
                   </div>
                 </div>
+
+                <div className=''>
+                  <p className='py-1'>Type:</p>
+                  <div>
+                    <label htmlFor="noiseTypes"></label>
+
+                    <select onChange={(e) => {setNoiseType(noiseTypes[e.target.value])}} className='duration-200 w-full pl-1 rounded-md ring-2 ring-gray-500 hover:ring-gray-100 bg-slate-800' name="noiseTypes" id="noiseTypes">
+                      <option value="absCellNoise">Abs Cell</option>
+                      <option value="cellNoise">Soft Cell</option>
+                      <option value="heightNoise">Height</option>
+                      <option value="heightCellMult">Hybrid Height</option>
+                      
+                    </select>
+                  </div>
+                </div>
+
               </div>
 
               <div className='grid content-start w-full overflow-hidden  bg-gray-800/40 rounded-md p-2 text-white backdrop-blur-3xl'>
